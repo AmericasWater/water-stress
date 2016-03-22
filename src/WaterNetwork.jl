@@ -8,7 +8,7 @@ using Mimi
     gauges = Index()
 
     # External
-    added = Parameter(index=[gauges, time]) # Water added at node
+    added = Parameter(index=[gauges, time]) # Water added at node <- currently just runoff
     removed = Parameter(index=[gauges, time]) # Water removed from node
 
     inflows = Variable(index=[gauges, time]) # Sum of upstream outflows
@@ -39,4 +39,22 @@ function timestep(c::WaterNetwork, tt::Int)
         v.inflows[gg, tt] = allflow
         v.outflows[gg, tt] = allflow + p.added[gg, tt] - p.removed[gg, tt]
     end
+end
+
+function initwaternetwork(m::Model)
+    waternetwork = addcomponent(m, WaterNetwork)
+
+    # runoff loaded by weather.jl
+
+    alladded = Matrix{Float64}(m.indices_counts[:regions], length(years))
+
+    for tt in 1:length(months)
+        for rr in 1:m.indices_counts[:regions]
+            alladded[rr, tt] = runoff[rr, tt]
+        end
+    end
+
+    waternetwork[:added] = alladded
+
+    waternetwork
 end

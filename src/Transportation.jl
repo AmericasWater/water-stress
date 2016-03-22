@@ -9,6 +9,7 @@ using Mimi
 @defcomp Transportation begin
     regions = Index()
     edges = Index()
+    crops = Index()
 
     # Internal
     # Cost per unit for transportation on a given edge
@@ -16,14 +17,14 @@ using Mimi
 
     # Set by optimiation
     # Amount of resource imported on each link
-    imported = Parameter(index=[edges, time])
+    imported = Parameter(index=[edges, crops, time])
 
     # The costs for each edge's transportation
-    cost = Variable(index=[edges, time])
+    cost = Variable(index=[edges, crops, time])
 
     # The total imported to and exported from each region
-    regionimports = Variable(index=[regions, time])
-    regionexports = Variable(index=[regions, time])
+    regionimports = Variable(index=[regions, crops, time])
+    regionexports = Variable(index=[regions, crops, time])
 end
 
 """
@@ -36,26 +37,30 @@ function timestep(c::Transportation, tt::Int)
 
     # Costs are easy: just resource imported * cost-per-unit
     for ee in d.edges
-        v.cost[ee, tt] = p.imported[ee, tt] * p.cost_edge[ee, tt]
+        for cc in d.crops
+            v.cost[ee, cc, tt] = p.imported[ee, cc, tt] * p.cost_edge[ee, tt]
+        end
     end
-    for ii in d.regions
-        v.regionexports[ii, tt] = 0.0
-    end
+    for cc in d.crops
+        for ii in d.regions
+            v.regionexports[ii, cc, tt] = 0.0
+        end
 
-    # Sum over all edges for each region to translate to region-basis
-    edge1 = 1
-    for ii in d.regions
-        # Get the number of edges this county imports from
-        numneighbors = out_degree(regverts[names[ii]], regionnet)
+        # Sum over all edges for each region to translate to region-basis
+        edge1 = 1
+        for ii in d.regions
+            # Get the number of edges this county imports from
+            numneighbors = out_degree(regverts[names[ii]], regionnet)
 
-        # Sum over all *out-edges* to get import
-        v.regionimports[ii, tt] = sum(p.imported[edge1:edge1 + numneighbors - 1, tt])
+            # Sum over all *out-edges* to get import
+            v.regionimports[ii, cc, tt] = sum(p.imported[edge1:edge1 + numneighbors - 1, cc, tt])
 
-        # Sum over the edges that have this as an out-edge
-        sources = get(sourceiis, ii, Int64[])
-        for source in sources
-            v.regionexports[source, tt] += p.imported[edge1, tt]
-            edge1 += 1 # length(sources) == numneighbors
+            # Sum over the edges that have this as an out-edge
+            sources = get(sourceiis, ii, Int64[])
+            for source in sources
+                v.regionexports[source, cc, tt] += p.imported[edge1, cc, tt]
+                edge1 += 1 # length(sources) == numneighbors
+            end
         end
     end
 end
@@ -75,7 +80,7 @@ function inittransportation(m::Model)
 
     # 10 USD / 1000 m^3
     transit[:cost_edge] = repmat([10.], m.indices_counts[:edges], m.indices_counts[:time])
-    transit[:imported] = repmat([0.], m.indices_counts[:edges], m.indices_counts[:time])
+    transit[:imported] = repeat([0.], outer=[m.indices_counts[:edges], m.indices_counts[:crops], m.indices_counts[:time]])
 
     transit
 end
