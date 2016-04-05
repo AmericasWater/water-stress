@@ -1,4 +1,4 @@
-# The waterdemand component
+# The conjunctiveuse component
 #
 # Combines all of the sources of water demand, and determines the
 # conjunctive use division between surface water and groundwater.
@@ -6,7 +6,7 @@
 using Mimi
 using DataFrames
 
-@defcomp WaterDemand begin
+@defcomp ConjunctiveUse begin
     regions = Index()
 
     # External
@@ -17,7 +17,9 @@ using DataFrames
 
     # Optimized
     # How much is taking from groundwater
-    gwportion = Parameter(index=[regions, time])
+    pumping = Parameter(index=[regions, time])
+    # How much to send from each gauge to each county
+    withdrawals = Parameter(index=[canals, time])
 
     # Internal
     # The cost in USD / 1000m^3 of pumping
@@ -26,9 +28,15 @@ using DataFrames
     # Total water demand (1000 m^3)
     totaldemand = Variable(index=[regions, time])
     # Portion from surface water, in 1000 m^3
-    swdemand = Parameter(index=[regions, time])
+    swdemand = Variable(index=[regions, time])
     # Groundwater to pump, in 1000 m^3
-    gwdemand = Parameter(index=[regions, time])
+    gwdemand = Variable(index=[regions, time])
+
+    # Combination across all canals supplying the counties
+    swsupply = Variable(index=[regions, time])
+    # Difference between swsupply and swdemand
+    swbalance = Variable(index=[regions, time])
+
     # The cost to pump it (USD)
     pumpingcost = Variable(index=[regions, time])
 end
@@ -36,7 +44,7 @@ end
 """
 Compute the amount extracted and the cost for doing it.
 """
-function timestep(c::WaterDemand, tt::Int)
+function timestep(c::ConjunctiveUse, tt::Int)
     v = c.Variables
     p = c.Parameters
     d = c.Dimensions
@@ -46,8 +54,8 @@ function timestep(c::WaterDemand, tt::Int)
         v.totaldemand[rr, tt] = p.totalirrigation[rr, tt] + p.domesticuse[rr, tt]
 
         # Split into surface and groundwater
-        v.swdemand[rr, tt] = v.totaldemand[rr, tt] * (1 - p.gwportion[rr, tt])
-        v.gwdemand[rr, tt] = v.totaldemand[rr, tt] * p.gwportion[rr, tt]
+        v.gwdemand[rr, tt] = v.pumping[rr, tt]
+        v.swdemand[rr, tt] = v.totaldemand[rr, tt] - p.pumping[rr, tt]
 
         # Total cost is pumping * cost-per-unit
         v.pumpingcost[rr, tt] = v.gwdemand[rr, tt] * p.cost_pumping[rr, tt]
@@ -55,14 +63,51 @@ function timestep(c::WaterDemand, tt::Int)
 end
 
 """
-Add a waterdemand component to the model.
+Add a conjunctiveuse component to the model.
 """
-function initconjunctiveuse(m::Model, years)
-    waterdemand = addcomponent(m, WaterDemand);
+function initconjunctiveuse(m::Model)
+    conjunctiveuse = addcomponent(m, ConjunctiveUse);
 
     # From http://www.oecd.org/unitedstates/45016437.pdf
     # Varies between 6.78 to 140 USD / 1000 m^3
-    waterdemand[:cost_pumping] = 100. * ones(m.indices_counts[:regions], m.indices_counts[:time])
+    conjunctiveuse[:cost_pumping] = 100. * ones(m.indices_counts[:regions], m.indices_counts[:time])
 
-    waterdemand
+    # Set optimized parameters to 0
+    conjunctiveuse[:pumping] = zeros(m.indices_counts[:regions], m.indices_counts[:time])
+    conjunctiveuse[:withdrawals] = zeros(m.indices_counts[:canals], m.indices_counts[:time])
+    conjunctiveuse[:totalirrigation] = zeros(m.indices_counts[:regions], m.indices_counts[:time])
+
+    conjunctiveuse
 end
+
+function soleobjective_conjunctiveuse(m::Model)
+    sum(model[:ConjunctiveUse, :pumpingcost])
+end
+
+function grad_conjunctiveuse_totalirrigation_swbalance(m::Model)
+    roomdiagonal(m, :ConjunctiveUse, :swbalance, :totalirrigation, (rr, tt) -> 1.)
+end
+
+function grad_conjunctiveuse_pumping_swbalance(m::Model)
+    roomdiagonal(m, :ConjunctiveUse, :swbalance, :pumping, (rr, tt) -> 1.)
+end
+
+function grad_conjunctiveuse_withdrawals_swbalance(m::Model)
+    function generate(A, tt)
+        # Fill in COUNTIES x CANALS matrix
+        for pp in 1:nrow(draws)
+            fips = draws[pp, :fips] < 10000 ? "0$(draws[pp, :fips])" : "$(draws[pp, :fips])"
+            rr = findfirst(names .== fips)
+            if rr > 0
+                A[rr, pp] = 1.
+            end
+        end
+    end
+
+    roomintersect(m, :ConjunctiveUse, :swbalance, :withdrawals, generate)
+end
+
+function grad_conjunctiveuse_pumping_cost(m::Model)
+    roomdiagonal(m, :ConjunctiveUse, :pumpingcost, :pumping, (rr, tt) -> 100.)
+end
+

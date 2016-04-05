@@ -7,11 +7,6 @@ typealias OverlaidRegionNetwork RegionNetwork{ExVertex, ExEdge}
 
 # Water network has OUT nodes to UPSTREAM
 
-suffix = "";
-if (netset == "dummy")
-    suffix = "-dummy";
-end
-
 empty_extnetwork() = OverlaidRegionNetwork(true, ExVertex[], 0, Vector{Vector{ExEdge}}())
 
 if isfile("../data/waternet$suffix.jld")

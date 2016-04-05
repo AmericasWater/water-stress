@@ -23,15 +23,12 @@ function timestep(c::WaterNetwork, tt::Int)
     p = c.Parameters
     d = c.Dimensions
 
-    for rr in d.gauges
-        gg = vertex_index(downstreamorder[rr])
-        gauge = downstreamorder[rr].label
+    for hh in d.gauges
+        gg = vertex_index(downstreamorder[hh])
+        gauge = downstreamorder[hh].label
         println("Process $gauge at $gg")
         allflow = 0.
         for upstream in out_neighbors(wateridverts[gauge], waternet)
-            println(upstream)
-            println(vertex_index(upstream, waternet))
-            println(v.outflows[vertex_index(upstream, waternet), tt])
             allflow += v.outflows[vertex_index(upstream, waternet), tt]
             println(allflow)
         end
@@ -44,17 +41,80 @@ end
 function initwaternetwork(m::Model)
     waternetwork = addcomponent(m, WaterNetwork)
 
-    # runoff loaded by weather.jl
+    # addeds loaded by weather.jl
 
-    alladded = Matrix{Float64}(m.indices_counts[:regions], length(years))
-
-    for tt in 1:length(months)
-        for rr in 1:m.indices_counts[:regions]
-            alladded[rr, tt] = runoff[rr, tt]
-        end
-    end
-
-    waternetwork[:added] = alladded
+    waternetwork[:added] = addeds[:, 1:numsteps]
 
     waternetwork
 end
+
+function grad_waternetwork_withdrawals_outflows(m::Model)
+    waternetdata = read_rda("../data/waternet.RData", convertdataframes=true);
+    netdata = waternetdata["network"];
+
+    function generate(A, tt)
+        # Fill in GAUGES x CANALS matrix
+        # First do locals
+        for pp in 1:nrow(draws)
+            row = round(Int64, draws[pp, :source])
+            gaugeid = "$(netdata[row, :collection]).$(netdata[row, :colid])"
+            gg = findfirst(collect(keys(wateridverts)) .== gaugeid)
+            if (gg == 0)
+                println("Missing $gaugeid")
+            else
+                A[gg, pp] = -1.
+            end
+        end
+
+        # Propogate in downstream order
+        for hh in 1:numgauges
+            gg = vertex_index(downstreamorder[hh])
+            println(gg)
+            gauge = downstreamorder[hh].label
+            for upstream in out_neighbors(wateridverts[gauge], waternet)
+                A[gg, :] += A[vertex_index(upstream, waternet), :]
+            end
+        end
+    end
+
+    roomintersect(m, :WaterNetwork, :outflows, :withdrawals, generate)
+end
+
+function grad_waternetwork_precipitation_antiwithdrawals(m::Model)
+    function generate(A, tt)
+        # Fill in CANALS x REGIONS
+        # Determine how many canals are in this region
+        for rr in 1:numcounties
+            fips = parse(Int64, names[rr])
+            thiscanals = find(draws[:fips] .== fips)
+            for pp in 1:length(thiscanals)
+                A[thiscanals[pp], rr] = countyarea[rr] / 100.
+            end
+        end
+    end
+
+    roomintersect(m, :WaterNetwork, :precipitation, :withdrawals, generate)
+end
+
+function constraintoffset_waternetwork_runoff(m::Model)
+    b = copy(addeds) # Start with direct added
+
+    # Propogate in downstream order
+    for hh in 1:numgauges
+        #println(maximum(b))
+        gg = vertex_index(downstreamorder[hh])
+        println(gg)
+        gauge = downstreamorder[hh].label
+        for upstream in out_neighbors(wateridverts[gauge], waternet)
+            b[gg, :] += b[vertex_index(upstream, waternet), :]
+        end
+    end
+
+    function generate(gg, tt)
+        # Determine number of gauges in county
+        b[gg, tt]
+    end
+
+    hallsingle(m, :WaterNetwork, :outflows, generate)
+end
+
