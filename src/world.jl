@@ -1,9 +1,3 @@
-netset = "usa" # dummy or usa
-
-# Only include counties within this state (give as 2 digit FIPS)
-# "10" for Delaware (3 counties), "08" for Colorado (64 counties)
-filterstate = nothing # "10"
-
 suffix = (filterstate != nothing ? "-$filterstate" : "")
 if (netset == "dummy")
     suffix = "-dummy";

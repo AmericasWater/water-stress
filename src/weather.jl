@@ -6,7 +6,7 @@ statefips = ncread("../data/VIC_WB.nc", "state_fips")
 countyfips = ncread("../data/VIC_WB.nc", "county_fips")
 fips = map(fipsnum -> (fipsnum < 10000 ? "0$fipsnum" : "$fipsnum"), round(Int, statefips * 1000 + countyfips))
 
-counties = readtable("../../data/county-info.csv", eltypes=[UTF8String, UTF8String, UTF8String, UTF8String, Float64, Float64, Float64, Float64, Float64, Float64, Float64])
+counties = readtable("../data/county-info.csv", eltypes=[UTF8String, UTF8String, UTF8String, UTF8String, Float64, Float64, Float64, Float64, Float64, Float64, Float64])
 counties[:FIPS] = map(fips -> length(fips) == 4 ? "0$fips" : fips, counties[:FIPS])
 
 function reorderfips(weather::DataArrays.DataArray{Float64, 1}, fromfips, tofips)
@@ -23,6 +23,8 @@ end
 
 counties[isna(counties[:, :TotalArea_sqmi]), :TotalArea_sqmi] = 0
 countyareas = reorderfips(counties[:, :TotalArea_sqmi] * 258.999, counties[:FIPS], names) # Ha
+counties[isna(counties[:, :LandArea_sqmi]), :LandArea_sqmi] = 0
+countylandareas = reorderfips(counties[:, :LandArea_sqmi] * 258.999, counties[:FIPS], names) # Ha
 
 function reorderfips(weather::Array{Float64, 2}, fromfips, tofips)
     result = zeros(length(tofips), size(weather, 1))
@@ -67,9 +69,12 @@ for rr in 1:numcounties
         continue
     end
     fips = parse(Int64, names[rr])
-    gauges = convert(Vector{Int64}, draws[draws[:fips] .== fips, :source])
+    countygauges = draws[draws[:fips] .== fips, :gaugeid]
+    countyindexes = [gaugeid in keys(wateridverts) ? vertex_index(wateridverts[gaugeid]) : 0 for gaugeid in countygauges]
+    gauges = convert(Vector{Int64}, countyindexes)
 
-    gauges = gauges[gauges .<= numgauges] # instances of higher gauge numbers
+    invalids = gauges .== 0
+    gauges[invalids] = nrow(stations) + 1
     stationareas = stations[gauges[gauges .<= nrow(stations)], :area]
     if length(stationareas) == 0
         continue

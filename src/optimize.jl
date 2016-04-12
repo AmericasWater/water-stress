@@ -1,8 +1,14 @@
 using Mimi
 include("linproghouse.jl")
 
+netset = "usa" # dummy or usa
+
+# Only include counties within this state (give as 2 digit FIPS)
+# "10" for Delaware (3 counties), "08" for Colorado (64 counties)
+filterstate = nothing #"10"
+
 redohouse = true
-redogwwo = true
+redogwwo = false
 
 include("world.jl")
 include("weather.jl")
@@ -33,6 +39,10 @@ paramcomps = [:ConjunctiveUse, :ConjunctiveUse, :Agriculture, :Agriculture, :Tra
 parameters = [:pumping, :withdrawals, :rainfedareas, :irrigatedareas, :imported, :internationalsales]
 constcomps = [:Agriculture, :WaterNetwork, :ConjunctiveUse, :Market, :Market]
 constraints = [:allagarea, :outflows, :swbalance, :available, :domesticbalance]
+## Constraint definitions:
+# domesticbalance is the amount being supplied to local markets
+# outflows is the water in the stream
+# swbalance is the demand minus supply
 
 if redohouse
     house = LinearProgrammingHouse(m, paramcomps, parameters, constcomps, constraints);
@@ -40,6 +50,8 @@ if redohouse
     # Optimize revenue_domestic + revenue_international - pumping_cost - transit_cost
     setobjective!(house, -varsum(grad_conjunctiveuse_pumping_cost(m)))
     setobjective!(house, -varsum(grad_transportation_imported_cost(m)))
+    setobjective!(house, -varsum(grad_agriculture_rainfedareas_cost(m)))
+    setobjective!(house, -varsum(grad_agriculture_irrigatedareas_cost(m)))
     setobjective!(house, deriv_market_internationalsales_totalrevenue(m))
     setobjective!(house, deriv_market_produced_totalrevenue(m) * room_relabel(grad_agriculture_rainfedareas_production(m), :production, :Market, :produced))
     setobjective!(house, deriv_market_produced_totalrevenue(m) * room_relabel(grad_agriculture_irrigatedareas_production(m), :production, :Market, :produced))
@@ -106,7 +118,12 @@ else
 end
 
 using MathProgBase
-@time sol = linprog(-house.f, house.A, '<', house.b, house.lowers, house.uppers) #1e8 * ones(length(house.uppers)))
+@time sol = linprog(-house.f, house.A, '<', house.b, house.lowers, house.uppers)
+
+coning = constraining(house, sol.sol)
+
+rdf = DataFrame(fips=names);
+cdf = DataFrame(fips=repmat(names, numcrops), crop=vec(repeat(crops, inner=[numcounties, 1])));
 
 # Look at parameter values
 varlens = varlengths(m, house.paramcomps, house.parameters)
@@ -115,11 +132,20 @@ for ii in 1:length(house.parameters)
     index1 = sum(varlens[1:ii-1]) + 1
     index2 = sum(varlens[1:ii])
 
-    values = sol.sol[index1:index2][1:min(100, index2 - index1 + 1)]
+    values = sol.sol[index1:index2]
+
+    if varlens[ii] == nrow(rdf)
+        rdf[house.parameters[ii]] = values
+    elseif varlens[ii] == nrow(cdf)
+        cdf[house.parameters[ii]] = values
+    else
+        #println("Cannot store: $(varlens[ii])")
+    end
+
     if (sum(values .!= 0) == 0)
         println("All zero.")
     else
-        println(values)
+        println(values[1:min(100, index2 - index1 + 1)])
         println("Sum: $(sum(values))")
     end
 end
@@ -133,10 +159,22 @@ for ii in 1:length(house.constraints)
     index1 = sum(varlens[1:ii-1]) + 1
     index2 = sum(varlens[1:ii])
 
-    values = constvalues[index1:index2][1:min(100, index2 - index1 + 1)]
+    values = constvalues[index1:index2]
+
+    if varlens[ii] == nrow(rdf)
+        rdf[house.constraints[ii]] = values
+    elseif varlens[ii] == nrow(cdf)
+        cdf[house.constraints[ii]] = values
+    else
+        #println("Cannot store: $(varlens[ii])")
+    end
+
     if (sum(values .!= 0) == 0)
         println("All zero.")
     else
-        println(values)
+        println(values[1:min(100, index2 - index1 + 1)])
     end
 end
+
+writetable("results/regionout.csv", rdf)
+writetable("results/cropsout.csv", cdf)

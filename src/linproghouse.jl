@@ -196,6 +196,54 @@ function gethouse(house::LinearProgrammingHouse, rr::Int64, cc::Int64)
     println("$(house.constcomps[varii]).$(house.constraints[varii])$(toindex(rrrelative, vardims)), $(house.paramcomps[parii]).$(house.parameters[parii])$(toindex(ccrelative, pardims)) = $(house.A[rr, cc])")
 end
 
+function constraining(house::LinearProgrammingHouse, solution::Vector{Float64})
+    # Determine which constraint (if any) is stopping an increase or decrease of each
+    df = DataFrame(solution=solution)
+    df[:component] = :na
+    df[:parameter] = :na
+    df[:abovefail] = ""
+    df[:belowfail] = ""
+
+    # Produce names for all constraints
+    varlens = varlengths(house.model, house.constcomps, house.constraints)
+    names = ["" for ii in 1:sum(varlens)]
+    for kk in 1:length(house.constcomps)
+        ii0 = sum(varlens[1:kk-1])
+        for ii in 1:varlens[kk]
+            names[ii0 + ii] = "$(house.constraints[kk]).$ii"
+        end
+    end
+
+    varlens = varlengths(house.model, house.paramcomps, house.parameters)
+    baseconsts = house.A * solution
+
+    println("Ignore:")
+    println(join(names[find(baseconsts .> house.b)], ", "))
+    ignore = baseconsts .> house.b
+
+    for kk in 1:length(house.paramcomps)
+        ii0 = sum(varlens[1:kk-1])
+        for ii in 1:varlens[kk]
+            df[ii0 + ii, :component] = house.paramcomps[kk]
+            df[ii0 + ii, :parameter] = house.parameters[kk]
+
+            newconst = baseconsts + house.A[:, ii0 + ii] * 1e-6
+            df[ii0 + ii, :abovefail] = join(names[find((newconst .> house.b) & !ignore)], ", ")
+
+            newconst = baseconsts - house.A[:, ii0 + ii] * 1e-6
+            df[ii0 + ii, :belowfail] = join(names[find((newconst .> house.b) & !ignore)], ", ")
+        end
+    end
+
+    df
+end
+
+function rangeof(m::Model, name, components, names)
+    varlens = varlengths(m, components, names)
+    kk = findfirst(name .== names)
+    sum(varlens[1:kk-1])+1:sum(varlens[1:kk])
+end
+
 ## Helpers
 
 "Translate an offset value (+1) to an index vector."
@@ -204,7 +252,7 @@ function toindex(ii::Int64, dims::Vector{Int64})
     offset = ii - 1
     for dd in 1:length(dims)
         indexes[dd] = offset % dims[dd] + 1
-        offset = round(Int64, offset / dims[dd])
+        offset = floor(Int64, offset / dims[dd])
     end
 
     return indexes
@@ -213,7 +261,7 @@ end
 "Translate an index vector to an offset (+1)."
 function fromindex(index::Vector{Int64}, dims::Vector{Int64})
     offset = index[end]
-    for ii in length(dims)-1:1
+    for ii in length(dims)-1:-1:1
         offset = (offset - 1) * dims[ii] + index[ii]
     end
 
@@ -230,7 +278,7 @@ function getdims(model::Model, component::Symbol, name::Symbol)
         end
     else
         meta = metainfo.getallcomps()
-        convert(Vector{Int64}, map(dim -> model.indices_counts[dim], meta[eval(component)].variables[name].dimensions))
+        convert(Vector{Int64}, map(dim -> model.indices_counts[dim], meta[(:Main, component)].variables[name].dimensions))
     end
 end
 

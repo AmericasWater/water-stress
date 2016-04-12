@@ -57,12 +57,12 @@ function initdomesticdemand(m::Model, years)
     domesticdemand[:waterdemandperperson] = 575 * 365.25 * .001 # m^3 / yr
 
     # How much of each crop will people buy per year?
-    domesticdemand[:cropinterestperperson] = [1., # .2 pounds meat (alfalfa / 10) per day
-                                              1., # .2 pounds meat (otherhay / 10) per day
-                                              .005, # bushels Barley per day
-                                              .005, # bushels Barley.Winter per day
-                                              .05, # bushels Maize per day
-                                              .01, # pounds Sorghum per day
+    domesticdemand[:cropinterestperperson] = 365.25 * [1., # .2 pounds meat (alfalfa / 10) per day
+                                                       1., # .2 pounds meat (otherhay / 10) per day
+                                                       .005, # bushels Barley per day
+                                                       .005, # bushels Barley.Winter per day
+                                                       .05, # bushels Maize per day
+    .01, # pounds Sorghum per day
     .02, # bushels Soybeans per day
     .05, # bushels Wheat per day
     .05] # bushels Wheat.Winter per day

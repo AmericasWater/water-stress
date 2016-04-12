@@ -5,6 +5,8 @@ using DataFrames
 typealias RegionNetwork{R, E} IncidenceList{R, E}
 typealias OverlaidRegionNetwork RegionNetwork{ExVertex, ExEdge}
 
+filtersincludeupstream = false # true to include all upstream nodes during a filter
+
 # Water network has OUT nodes to UPSTREAM
 
 empty_extnetwork() = OverlaidRegionNetwork(true, ExVertex[], 0, Vector{Vector{ExEdge}}())
@@ -27,9 +29,51 @@ else
 
     netdata = waternetdata["network"];
 
+    # Load the county-network connections
+    draws = drawsdata["draws"];
+    draws[:source] = round(Int64, draws[:source])
+    # Label all with the node name
+    draws[:gaugeid] = ""
+    for ii in 1:nrow(draws)
+        row = draws[ii, :source]
+        draws[ii, :gaugeid] = "$(netdata[row, :collection]).$(netdata[row, :colid])"
+    end
+
+    if filterstate != nothing
+        states = round(Int64, draws[:fips] / 1000)
+        draws = draws[states .== parse(Int64, filterstate), :]
+
+        includeds = falses(nrow(netdata))
+        if filtersincludeupstream
+            # Flag all upstream nodes
+            checks = draws[:source]
+            while length(checks) > 0
+                includeds[checks] = true
+
+                nexts = []
+                for check in checks
+                    nexts = [nexts; find(netdata[:nextpt] .== check)]
+                end
+
+                checks = nexts
+            end
+        else
+            includeds[draws[:source]] = true
+        end
+
+        # Clean out the source column, so these no longer have meaning!
+        draws[:source] = nothing
+    else
+        includeds = trues(nrow(netdata))
+    end
+
     wateridverts = Dict{UTF8String, ExVertex}();
     waternet = empty_extnetwork();
     for row in 1:nrow(netdata)
+        if !includeds[row]
+            continue
+        end
+
         println(row)
         nextpt = netdata[row, :nextpt]
         if isna(nextpt)
@@ -63,12 +107,8 @@ else
 
         #if test_cyclic_by_dfs(waternet)
         #    error("Cycles off the road!")
-        #    # 6538 - 6539
         #end
     end
-
-    # Load the county-network connections
-    draws = drawsdata["draws"];
 
     # Construct the network
     serialize(open("../data/waternet$suffix.jld", "w"), waternet)

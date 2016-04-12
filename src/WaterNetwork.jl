@@ -56,8 +56,7 @@ function grad_waternetwork_withdrawals_outflows(m::Model)
         # Fill in GAUGES x CANALS matrix
         # First do locals
         for pp in 1:nrow(draws)
-            row = round(Int64, draws[pp, :source])
-            gaugeid = "$(netdata[row, :collection]).$(netdata[row, :colid])"
+            gaugeid = draws[pp, :gaugeid]
             gg = findfirst(collect(keys(wateridverts)) .== gaugeid)
             if (gg == 0)
                 println("Missing $gaugeid")
